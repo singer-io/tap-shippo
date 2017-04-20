@@ -49,11 +49,11 @@ NEXT = 'next'
 
 # List of all the endpoints we'll sync.
 ENDPOINTS = [
-    BASE_URL + "addresses?results=10",
-    BASE_URL + "parcels?results=10",
-    BASE_URL + "shipments?results=10",
-    BASE_URL + "transactions?results=10",
-    BASE_URL + "refunds?results=10"
+    BASE_URL + "addresses?results=1000",
+    BASE_URL + "parcels?results=1000",
+    BASE_URL + "shipments?results=1000",
+    BASE_URL + "transactions?results=1000",
+    BASE_URL + "refunds?results=1000"
 ]
 
 
