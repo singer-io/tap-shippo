@@ -160,9 +160,9 @@ def get_starting_urls(state):
         for url in ENDPOINTS:
             if parse_stream_from_url(url) == target_stream:
                 urls.append(next_url)
-            elif len(urls) > 0:
+            elif urls:
                 urls.append(url)
-        if len(urls) == 0:
+        if not urls:
             raise Exception('Unknown stream ' + target_stream)
         return urls
 
