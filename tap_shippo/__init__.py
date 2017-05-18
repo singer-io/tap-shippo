@@ -123,7 +123,7 @@ def sync_endpoint(url, state):
         start = pendulum.parse(CONFIG[START_DATE])
     # The Shippo API does not return data from long ago, so we only try to
     # replicate the last 60 days
-    sixty_days_ago = pendulum.now().subtract(days=6)#60)
+    sixty_days_ago = pendulum.now().subtract(days=60)
     bounded_start = max(start, sixty_days_ago)
     LOGGER.info("Replicating all %s from %s", stream, bounded_start)
 
