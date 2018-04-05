@@ -90,6 +90,8 @@ def request(url):
 
     '''
     headers = {'Authorization': 'ShippoToken ' + CONFIG['token']}
+    headers['Shippo-API-Version'] = '2018-02-08'
+    
     if 'user_agent' in CONFIG:
         headers['User-Agent'] = CONFIG['user_agent']
 
