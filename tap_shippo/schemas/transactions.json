@@ -31,7 +31,38 @@
             "type": "string"
         },
         "tracking_status": {
-            "type": ["null", "string"]
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "status": {
+                    "type": "string"
+                },
+                "status_details": {
+                    "type": "string"
+                },
+                "status_date": {
+                    "type": "string",
+                    "format": "date-time"
+                },
+                "location": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "city": {
+                            "type": "string"
+                        },
+                        "state": {
+                            "type": "string"
+                        },
+                        "zip": {
+                            "type": "string"
+                        },
+                        "country": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
         },
         "tracking_history": {
             "type": "array"
@@ -65,4 +96,3 @@
     },
     "required": ["object_id"]
 }
-
