@@ -30,8 +30,7 @@ import backoff
 import pendulum
 import requests
 import singer
-from singer import utils
-import singer.metrics as metrics
+from singer import utils, metrics
 
 REQUIRED_CONFIG_KEYS = ['start_date', 'token']
 BASE_URL = "https://api.goshippo.com/"
@@ -53,7 +52,7 @@ NEXT = 'next'
 ENDPOINTS = [
     BASE_URL + "transactions?results=1000",
     BASE_URL + "refunds?results=1000",
-    BASE_URL + "shipments?results=1000",
+    BASE_URL + "shipments?results=1000&object_created_gte={}&object_created_lt={}",
     BASE_URL + "parcels?results=1000",
     BASE_URL + "addresses?results=1000",
 ]
@@ -114,6 +113,12 @@ def fix_extra_map(row):
         row['extra'] = {}
     return row
 
+def get_start(state):
+    if LAST_START_DATE in state:
+        return pendulum.parse(state[LAST_START_DATE]).subtract(days=2)
+    return  pendulum.parse(CONFIG[START_DATE])
+
+
 def sync_endpoint(initial_url, state):
     '''Syncs the url and paginates through until there are no more "next"
     urls. Yields schema, record, and state messages. Modifies state by
@@ -128,33 +133,26 @@ def sync_endpoint(initial_url, state):
         schema=load_schema(stream),
         key_properties=["object_id"])
 
-    if LAST_START_DATE in state:
-        start = pendulum.parse(state[LAST_START_DATE]).subtract(days=2)
-    else:
-        start = pendulum.parse(CONFIG[START_DATE])
     # The Shippo API does not return data from long ago, so we only try to
     # replicate the last 60 days
     # Shipments allows us to page by date, so we can request historical data for this stream
     sixty_days_ago = pendulum.now().subtract(days=60)
     if stream == 'shipments':
-        bounded_start = start
+        bounded_start = get_start(state)
         shipments_query_start = bounded_start
         shipments_query_end = bounded_start.add(days=SHIPMENTS_WINDOW_DAYS)
+        url = url.format(shipments_query_start.strftime("%Y-%m-%dT%I:%M:%SZ"),
+                         shipments_query_end.strftime("%Y-%m-%dT%I:%M:%SZ"))
     else:
-        bounded_start = max(start, sixty_days_ago)
+        bounded_start = max(get_start(state), sixty_days_ago)
     LOGGER.info("Replicating all %s from %s", stream, bounded_start)
 
     rows_read = 0
     rows_written = 0
-    finished = False
 
     with metrics.record_counter(parse_stream_from_url(url)) as counter:
         endpoint_start = pendulum.now()
-        while url and not finished:
-            if stream == 'shipments' and url == initial_url:
-                url += "&object_created_gte={}".format(shipments_query_start.strftime("%Y-%m-%dT%I:%M:%SZ"))
-                url += "&object_created_lt={}".format(shipments_query_end.strftime("%Y-%m-%dT%I:%M:%SZ"))
-
+        while url:
             state[NEXT] = url
             yield singer.StateMessage(value=state)
 
@@ -168,18 +166,14 @@ def sync_endpoint(initial_url, state):
                     row = fix_extra_map(row)
                     yield singer.RecordMessage(stream=stream, record=row)
                     rows_written += 1
-                elif stream == 'shipments' and shipments_query_end < endpoint_start:
-                    pass # Move to advance the window below
-                else:
-                    finished = True
-                    break
 
             if data.get(NEXT):
                 url = data.get(NEXT)
             elif stream == 'shipments' and shipments_query_end < endpoint_start:
                 shipments_query_start = shipments_query_end
                 shipments_query_end = shipments_query_start.add(days=SHIPMENTS_WINDOW_DAYS)
-                url = initial_url
+                url = initial_url.format(shipments_query_start.strftime("%Y-%m-%dT%I:%M:%SZ"),
+                                         shipments_query_end.strftime("%Y-%m-%dT%I:%M:%SZ"))
             else:
                 url = None
 
@@ -196,19 +190,19 @@ def get_starting_urls(state):
     next_url = state.get(NEXT)
     if next_url is None:
         return ENDPOINTS
-    else:
-        urls = []
-        target_stream = parse_stream_from_url(next_url)
-        LOGGER.info('Will pick up where we left off with URL %s (stream %s)',
-                    next_url, target_stream)
-        for url in ENDPOINTS:
-            if parse_stream_from_url(url) == target_stream:
-                urls.append(next_url)
-            elif urls:
-                urls.append(url)
-        if not urls:
-            raise Exception('Unknown stream ' + target_stream)
-        return urls
+
+    urls = []
+    target_stream = parse_stream_from_url(next_url)
+    LOGGER.info('Will pick up where we left off with URL %s (stream %s)',
+                next_url, target_stream)
+    for url in ENDPOINTS:
+        if parse_stream_from_url(url) == target_stream:
+            urls.append(next_url)
+        elif urls:
+            urls.append(url)
+    if not urls:
+        raise Exception('Unknown stream ' + target_stream)
+    return urls
 
 
 def do_sync(state):
