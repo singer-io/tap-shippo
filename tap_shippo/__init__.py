@@ -40,6 +40,8 @@ CONFIG = {}
 SESSION = requests.Session()
 LOGGER = singer.get_logger()
 
+SHIPMENTS_WINDOW_DAYS = 7
+
 # Field names, for the results we get from Shippo, and for the state map
 LAST_START_DATE = 'last_start_date'
 THIS_START_DATE = 'this_start_date'
@@ -91,7 +93,7 @@ def request(url):
     '''
     headers = {'Authorization': 'ShippoToken ' + CONFIG['token']}
     headers['Shippo-API-Version'] = '2018-02-08'
-    
+
     if 'user_agent' in CONFIG:
         headers['User-Agent'] = CONFIG['user_agent']
 
@@ -112,13 +114,14 @@ def fix_extra_map(row):
         row['extra'] = {}
     return row
 
-def sync_endpoint(url, state):
+def sync_endpoint(initial_url, state):
     '''Syncs the url and paginates through until there are no more "next"
     urls. Yields schema, record, and state messages. Modifies state by
     setting the NEXT field every time we get a next url from Shippo. This
     allows us to resume paginating if we're terminated.
 
     '''
+    url = initial_url
     stream = parse_stream_from_url(url)
     yield singer.SchemaMessage(
         stream=stream,
@@ -131,15 +134,27 @@ def sync_endpoint(url, state):
         start = pendulum.parse(CONFIG[START_DATE])
     # The Shippo API does not return data from long ago, so we only try to
     # replicate the last 60 days
+    # Shipments allows us to page by date, so we can request historical data for this stream
     sixty_days_ago = pendulum.now().subtract(days=60)
-    bounded_start = max(start, sixty_days_ago)
+    if stream == 'shipments':
+        bounded_start = start
+        shipments_query_start = bounded_start
+        shipments_query_end = bounded_start.add(days=SHIPMENTS_WINDOW_DAYS)
+    else:
+        bounded_start = max(start, sixty_days_ago)
     LOGGER.info("Replicating all %s from %s", stream, bounded_start)
 
     rows_read = 0
     rows_written = 0
     finished = False
+
     with metrics.record_counter(parse_stream_from_url(url)) as counter:
+        endpoint_start = pendulum.now()
         while url and not finished:
+            if stream == 'shipments' and url == initial_url:
+                url += "&object_created_gte={}".format(shipments_query_start.strftime("%Y-%m-%dT%I:%M:%SZ"))
+                url += "&object_created_lt={}".format(shipments_query_end.strftime("%Y-%m-%dT%I:%M:%SZ"))
+
             state[NEXT] = url
             yield singer.StateMessage(value=state)
 
@@ -153,11 +168,20 @@ def sync_endpoint(url, state):
                     row = fix_extra_map(row)
                     yield singer.RecordMessage(stream=stream, record=row)
                     rows_written += 1
+                elif stream == 'shipments' and shipments_query_end < endpoint_start:
+                    pass # Move to advance the window below
                 else:
                     finished = True
                     break
 
-            url = data.get(NEXT)
+            if data.get(NEXT):
+                url = data.get(NEXT)
+            elif stream == 'shipments' and shipments_query_end < endpoint_start:
+                shipments_query_start = shipments_query_end
+                shipments_query_end = shipments_query_start.add(days=SHIPMENTS_WINDOW_DAYS)
+                url = initial_url
+            else:
+                url = None
 
     if rows_read:
         LOGGER.info("Done syncing %s. Read %d records, wrote %d (%.2f%%)",
