@@ -141,7 +141,7 @@ def sync_endpoint(initial_url, state):
         shipments_query_start = bounded_start
         shipments_query_end = bounded_start.add(days=SHIPMENTS_WINDOW_DAYS)
         url = initial_url.format(shipments_query_start.strftime("%Y-%m-%dT%I:%M:%SZ"),
-                         shipments_query_end.strftime("%Y-%m-%dT%I:%M:%SZ"))
+                                 shipments_query_end.strftime("%Y-%m-%dT%I:%M:%SZ"))
     else:
         bounded_start = max(get_start(state), sixty_days_ago)
         url = initial_url
