@@ -39,7 +39,10 @@ CONFIG = {}
 SESSION = requests.Session()
 LOGGER = singer.get_logger()
 
-SHIPMENTS_WINDOW_DAYS = 7
+SLIDING_WINDOW_DAYS = 7
+SLIDING_WINDOW_STREAMS = {
+    "shipments": "object_created"
+}
 
 # Field names, for the results we get from Shippo, and for the state map
 LAST_START_DATE = 'last_start_date'
@@ -52,7 +55,7 @@ NEXT = 'next'
 ENDPOINTS = [
     BASE_URL + "transactions?results=1000",
     BASE_URL + "refunds?results=1000",
-    BASE_URL + "shipments?results=1000&object_created_gte={}&object_created_lt={}",
+    BASE_URL + "shipments?results=1000&{0}_gte={1}&{0}_lt={2}",
     BASE_URL + "parcels?results=1000",
     BASE_URL + "addresses?results=1000",
 ]
@@ -134,14 +137,16 @@ def sync_endpoint(initial_url, state):
 
     # The Shippo API does not return data from long ago, so we only try to
     # replicate the last 60 days
-    # Shipments allows us to page by date, so we can request historical data for this stream
+    # Some streams allow us to page by date, so we can request historical data for them
     sixty_days_ago = pendulum.now().subtract(days=60)
-    if stream == 'shipments':
+    sliding_window_key = SLIDING_WINDOW_STREAMS.get(stream)
+    if sliding_window_key:
         bounded_start = get_start(state)
-        shipments_query_start = bounded_start
-        shipments_query_end = bounded_start.add(days=SHIPMENTS_WINDOW_DAYS)
-        url = initial_url.format(shipments_query_start.strftime("%Y-%m-%dT%I:%M:%SZ"),
-                                 shipments_query_end.strftime("%Y-%m-%dT%I:%M:%SZ"))
+        sliding_query_start = bounded_start
+        sliding_query_end = bounded_start.add(days=SLIDING_WINDOW_DAYS)
+        url = initial_url.format(sliding_window_key,
+                                 sliding_query_start.strftime("%Y-%m-%dT%I:%M:%SZ"),
+                                 sliding_query_end.strftime("%Y-%m-%dT%I:%M:%SZ"))
     else:
         bounded_start = max(get_start(state), sixty_days_ago)
         url = initial_url
@@ -169,11 +174,12 @@ def sync_endpoint(initial_url, state):
 
             if data.get(NEXT):
                 url = data.get(NEXT)
-            elif stream == 'shipments' and shipments_query_end < endpoint_start:
-                shipments_query_start = shipments_query_end
-                shipments_query_end = shipments_query_start.add(days=SHIPMENTS_WINDOW_DAYS)
-                url = initial_url.format(shipments_query_start.strftime("%Y-%m-%dT%I:%M:%SZ"),
-                                         shipments_query_end.strftime("%Y-%m-%dT%I:%M:%SZ"))
+            elif sliding_window_key and sliding_query_end < endpoint_start:
+                sliding_query_start = sliding_query_end
+                sliding_query_end = sliding_query_start.add(days=SLIDING_WINDOW_DAYS)
+                url = initial_url.format(sliding_window_key,
+                                         sliding_query_start.strftime("%Y-%m-%dT%I:%M:%SZ"),
+                                         sliding_query_end.strftime("%Y-%m-%dT%I:%M:%SZ"))
             else:
                 url = None
 
