@@ -52,7 +52,7 @@ NEXT = 'next'
 ENDPOINTS = [
     BASE_URL + "transactions?results=1000",
     BASE_URL + "refunds?results=1000",
-    BASE_URL + "shipments?results=1000&object_created_gte={}&object_created_lt={}",
+    BASE_URL + "shipments?results=1000&object_updated_gte={}&object_updated_lt={}",
     BASE_URL + "parcels?results=1000",
     BASE_URL + "addresses?results=1000",
 ]
@@ -126,8 +126,7 @@ def sync_endpoint(initial_url, state):
     allows us to resume paginating if we're terminated.
 
     '''
-    url = initial_url
-    stream = parse_stream_from_url(url)
+    stream = parse_stream_from_url(initial_url)
     yield singer.SchemaMessage(
         stream=stream,
         schema=load_schema(stream),
@@ -141,10 +140,11 @@ def sync_endpoint(initial_url, state):
         bounded_start = get_start(state)
         shipments_query_start = bounded_start
         shipments_query_end = bounded_start.add(days=SHIPMENTS_WINDOW_DAYS)
-        url = url.format(shipments_query_start.strftime("%Y-%m-%dT%I:%M:%SZ"),
+        url = initial_url.format(shipments_query_start.strftime("%Y-%m-%dT%I:%M:%SZ"),
                          shipments_query_end.strftime("%Y-%m-%dT%I:%M:%SZ"))
     else:
         bounded_start = max(get_start(state), sixty_days_ago)
+        url = initial_url
     LOGGER.info("Replicating all %s from %s", stream, bounded_start)
 
     rows_read = 0
