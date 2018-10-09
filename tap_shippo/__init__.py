@@ -52,7 +52,7 @@ NEXT = 'next'
 ENDPOINTS = [
     BASE_URL + "transactions?results=1000",
     BASE_URL + "refunds?results=1000",
-    BASE_URL + "shipments?results=1000&object_updated_gte={}&object_updated_lt={}",
+    BASE_URL + "shipments?results=1000&object_created_gte={}&object_created_lt={}",
     BASE_URL + "parcels?results=1000",
     BASE_URL + "addresses?results=1000",
 ]
