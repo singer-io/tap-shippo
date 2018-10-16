@@ -30,8 +30,7 @@ import backoff
 import pendulum
 import requests
 import singer
-from singer import utils
-import singer.metrics as metrics
+from singer import utils, metrics
 
 REQUIRED_CONFIG_KEYS = ['start_date', 'token']
 BASE_URL = "https://api.goshippo.com/"
@@ -39,6 +38,11 @@ URL_PATTERN = r'https://api.goshippo.com/(\w+).*'
 CONFIG = {}
 SESSION = requests.Session()
 LOGGER = singer.get_logger()
+
+SLIDING_WINDOW_DAYS = 7
+SLIDING_WINDOW_STREAMS = {
+    "shipments": "object_created"
+}
 
 # Field names, for the results we get from Shippo, and for the state map
 LAST_START_DATE = 'last_start_date'
@@ -51,7 +55,7 @@ NEXT = 'next'
 ENDPOINTS = [
     BASE_URL + "transactions?results=1000",
     BASE_URL + "refunds?results=1000",
-    BASE_URL + "shipments?results=1000",
+    BASE_URL + "shipments?results=1000&{0}_gte={1}&{0}_lt={2}",
     BASE_URL + "parcels?results=1000",
     BASE_URL + "addresses?results=1000",
 ]
@@ -91,7 +95,7 @@ def request(url):
     '''
     headers = {'Authorization': 'ShippoToken ' + CONFIG['token']}
     headers['Shippo-API-Version'] = '2018-02-08'
-    
+
     if 'user_agent' in CONFIG:
         headers['User-Agent'] = CONFIG['user_agent']
 
@@ -112,34 +116,47 @@ def fix_extra_map(row):
         row['extra'] = {}
     return row
 
-def sync_endpoint(url, state):
+def get_start(state):
+    if LAST_START_DATE in state:
+        return pendulum.parse(state[LAST_START_DATE]).subtract(days=2)
+    return  pendulum.parse(CONFIG[START_DATE])
+
+
+def sync_endpoint(initial_url, state):
     '''Syncs the url and paginates through until there are no more "next"
     urls. Yields schema, record, and state messages. Modifies state by
     setting the NEXT field every time we get a next url from Shippo. This
     allows us to resume paginating if we're terminated.
 
     '''
-    stream = parse_stream_from_url(url)
+    stream = parse_stream_from_url(initial_url)
     yield singer.SchemaMessage(
         stream=stream,
         schema=load_schema(stream),
         key_properties=["object_id"])
 
-    if LAST_START_DATE in state:
-        start = pendulum.parse(state[LAST_START_DATE]).subtract(days=2)
-    else:
-        start = pendulum.parse(CONFIG[START_DATE])
     # The Shippo API does not return data from long ago, so we only try to
     # replicate the last 60 days
-    sixty_days_ago = pendulum.now().subtract(days=60)
-    bounded_start = max(start, sixty_days_ago)
+    # Some streams allow us to page by date, so we can request historical data for them
+    sliding_window_key = SLIDING_WINDOW_STREAMS.get(stream)
+    if sliding_window_key:
+        bounded_start = get_start(state)
+        sliding_query_start = bounded_start
+        sliding_query_end = bounded_start.add(days=SLIDING_WINDOW_DAYS)
+        url = initial_url.format(sliding_window_key,
+                                 sliding_query_start.strftime("%Y-%m-%dT%I:%M:%SZ"),
+                                 sliding_query_end.strftime("%Y-%m-%dT%I:%M:%SZ"))
+    else:
+        bounded_start = max(get_start(state), pendulum.now().subtract(days=60))
+        url = initial_url
     LOGGER.info("Replicating all %s from %s", stream, bounded_start)
 
     rows_read = 0
     rows_written = 0
-    finished = False
+
     with metrics.record_counter(parse_stream_from_url(url)) as counter:
-        while url and not finished:
+        endpoint_start = pendulum.now()
+        while url:
             state[NEXT] = url
             yield singer.StateMessage(value=state)
 
@@ -153,11 +170,17 @@ def sync_endpoint(url, state):
                     row = fix_extra_map(row)
                     yield singer.RecordMessage(stream=stream, record=row)
                     rows_written += 1
-                else:
-                    finished = True
-                    break
 
-            url = data.get(NEXT)
+            if data.get(NEXT):
+                url = data.get(NEXT)
+            elif sliding_window_key and sliding_query_end < endpoint_start:
+                sliding_query_start = sliding_query_end
+                sliding_query_end = sliding_query_start.add(days=SLIDING_WINDOW_DAYS)
+                url = initial_url.format(sliding_window_key,
+                                         sliding_query_start.strftime("%Y-%m-%dT%I:%M:%SZ"),
+                                         sliding_query_end.strftime("%Y-%m-%dT%I:%M:%SZ"))
+            else:
+                url = None
 
     if rows_read:
         LOGGER.info("Done syncing %s. Read %d records, wrote %d (%.2f%%)",
@@ -172,19 +195,19 @@ def get_starting_urls(state):
     next_url = state.get(NEXT)
     if next_url is None:
         return ENDPOINTS
-    else:
-        urls = []
-        target_stream = parse_stream_from_url(next_url)
-        LOGGER.info('Will pick up where we left off with URL %s (stream %s)',
-                    next_url, target_stream)
-        for url in ENDPOINTS:
-            if parse_stream_from_url(url) == target_stream:
-                urls.append(next_url)
-            elif urls:
-                urls.append(url)
-        if not urls:
-            raise Exception('Unknown stream ' + target_stream)
-        return urls
+
+    urls = []
+    target_stream = parse_stream_from_url(next_url)
+    LOGGER.info('Will pick up where we left off with URL %s (stream %s)',
+                next_url, target_stream)
+    for url in ENDPOINTS:
+        if parse_stream_from_url(url) == target_stream:
+            urls.append(next_url)
+        elif urls:
+            urls.append(url)
+    if not urls:
+        raise Exception('Unknown stream ' + target_stream)
+    return urls
 
 
 def do_sync(state):
