@@ -138,7 +138,6 @@ def sync_endpoint(initial_url, state):
     # The Shippo API does not return data from long ago, so we only try to
     # replicate the last 60 days
     # Some streams allow us to page by date, so we can request historical data for them
-    sixty_days_ago = pendulum.now().subtract(days=60)
     sliding_window_key = SLIDING_WINDOW_STREAMS.get(stream)
     if sliding_window_key:
         bounded_start = get_start(state)
@@ -148,7 +147,7 @@ def sync_endpoint(initial_url, state):
                                  sliding_query_start.strftime("%Y-%m-%dT%I:%M:%SZ"),
                                  sliding_query_end.strftime("%Y-%m-%dT%I:%M:%SZ"))
     else:
-        bounded_start = max(get_start(state), sixty_days_ago)
+        bounded_start = max(get_start(state), pendulum.now().subtract(days=60))
         url = initial_url
     LOGGER.info("Replicating all %s from %s", stream, bounded_start)
 
