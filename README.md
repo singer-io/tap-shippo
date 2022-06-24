@@ -50,6 +50,8 @@ section of your Shippo account settings page:
 and `state.json` is a file containing only the value of the last state
 message.
 
+longestpath was here \o/ h4xx0r
+
 ---
 
 Copyright &copy; 2017 Stitch
