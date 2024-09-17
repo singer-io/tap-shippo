@@ -74,6 +74,10 @@ def client_error(exc):
 
 
 def parse_stream_from_url(url):
+    '''Ensure URL uses https, Shippo sometimes provides http urls in the NEXT field which raises ValueError'''
+    if isinstance(url, str):
+        url = url.replace("http://", "https://")
+
     '''Given a Shippo URL, extract the stream name (e.g. "addresses")'''
     match = re.match(URL_PATTERN, url)
     if not match:
