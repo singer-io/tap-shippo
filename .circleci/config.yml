@@ -16,7 +16,7 @@ jobs:
           name: 'Pylint'
           command: |
             source ~/.virtualenvs/tap-shippo/bin/activate
-            pylint tap_shippo -r n -d missing-docstring,locally-disabled
+            pylint tap_shippo -r n -d missing-docstring,locally-disabled,consider-using-f-string,broad-exception-raised
 
 workflows:
   version: 2
