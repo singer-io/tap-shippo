@@ -17,3 +17,21 @@ jobs:
           command: |
             source ~/.virtualenvs/tap-shippo/bin/activate
             pylint tap_shippo -r n -d missing-docstring,locally-disabled
+
+workflows:
+  version: 2
+  commit:
+    jobs:
+      - build:
+          context: circleci-user
+  build_daily:
+    triggers:
+      - schedule:
+          cron: "0 12 * * *"
+          filters:
+            branches:
+              only:
+                - master
+    jobs:
+      - build:
+          context: circleci-user
