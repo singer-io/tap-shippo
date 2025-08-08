@@ -2,18 +2,36 @@ version: 2
 jobs:
   build:
     docker:
-      - image: circleci/python:3.4-jessie-browsers
+      - image: 218546966473.dkr.ecr.us-east-1.amazonaws.com/circle-ci:stitch-tap-tester-uv
     steps:
       - checkout
       - run:
           name: 'Setup'
           command: |
-            virtualenv -p python3 ~/.virtualenvs/tap-shippo
-            source ~/.virtualenvs/tap-shippo/bin/activate
-            pip install .
-            pip install pylint
+            uv venv --python 3.9 /usr/local/share/virtualenvs/tap-shippo
+            source /usr/local/share/virtualenvs/tap-shippo/bin/activate
+            uv pip install .
+            uv pip install pylint
       - run:
           name: 'Pylint'
           command: |
-            source ~/.virtualenvs/tap-shippo/bin/activate
-            pylint tap_shippo -r n -d missing-docstring,locally-disabled
+            source /usr/local/share/virtualenvs/tap-shippo/bin/activate
+            pylint tap_shippo -r n -d missing-docstring,locally-disabled,consider-using-f-string,broad-exception-raised
+
+workflows:
+  version: 2
+  commit:
+    jobs:
+      - build:
+          context: circleci-user
+  build_daily:
+    triggers:
+      - schedule:
+          cron: "0 12 * * *"
+          filters:
+            branches:
+              only:
+                - master
+    jobs:
+      - build:
+          context: circleci-user
