@@ -8,14 +8,14 @@ jobs:
       - run:
           name: 'Setup'
           command: |
-            uv venv --python 3.9 ~/.virtualenvs/tap-shippo
-            source ~/.virtualenvs/tap-shippo/bin/activate
+            uv venv --python 3.9 /usr/local/share/virtualenvs/tap-shippo
+            source /usr/local/share/virtualenvs/tap-shippo/bin/activate
             uv pip install .
             uv pip install pylint
       - run:
           name: 'Pylint'
           command: |
-            source ~/.virtualenvs/tap-shippo/bin/activate
+            source /usr/local/share/virtualenvs/tap-shippo/bin/activate
             pylint tap_shippo -r n -d missing-docstring,locally-disabled,consider-using-f-string,broad-exception-raised
 
 workflows:
